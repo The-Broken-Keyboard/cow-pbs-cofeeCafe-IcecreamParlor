@@ -369,7 +369,7 @@ int main()
         }
         for (int i = 0; i < n; i++)
         {
-            if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] < tmr || special_flag[i] == 1))
+            if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] <= tmr || special_flag[i] == 1))
             {
                 sem_post(&machines[i]);
                 special_flag[i] = 0;
@@ -413,22 +413,3 @@ chocolate brownie strawberry
 2 2 1
 2
 vanilla strawberry caramel*/
-
-/*2 3 3 3
-0 8
-4 10
-vanilla 3
-chocolate 4
-sid 2
-caramel 1
-brownie 4
-strawberry 4
-2
-1 1 2
-1
-vanilla caramel
-2
-chocolate brownie strawberry
-2 2 1
-2
-sid strawberry caramel*/

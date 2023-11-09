@@ -134,9 +134,11 @@ void *machine_simulation(void *arg)
                     int ftime = aglst->flavour_time[findex];
                     // printf("machine %d checking order %d\n", aglst->work_index + 1, cst);
                     int totaltop = order_list[cst].totaltoppings;
+                    int topping_shortage_flag=0;
                     for (int j = 0; j < totaltop; j++)
                     {
                         int tindex = give_index(aglst->topping_list, aglst->t, order_list[cst].toppings[j]);
+                        printf("current topping stock:%d\n",aglst->topping_stock[tindex]);
                         if (aglst->topping_stock[tindex] == 0)
                         {
                             // reject_flag = 1;
@@ -144,18 +146,22 @@ void *machine_simulation(void *arg)
                             order_list->orderstatus = 1;
                             rejection_cust[order_list[cst].cust_no] = 1;
                             sem_post(&rej_customers[order_list[cst].cust_no]);
-                            continue;
+                            topping_shortage_flag=1;
+                            break;
                         }
                     }
+                    if(topping_shortage_flag==1)
+                    continue;
 
                     if ((cust[order_list[flag].cust_no].cust_arrival == tmr && aglst->machine_end[aglst->work_index] - tmr >= ftime + 1) || (cust[order_list[flag].cust_no].cust_arrival < tmr && aglst->machine_end[aglst->work_index] - tmr >= ftime))
                     {
                         order_list[cst].order_taken_status = 1;
-
+                        printf("totaltop=%d\n",totaltop);
                         for (int j = 0; j < totaltop; j++)
                         {
                             int tindex = give_index(aglst->topping_list, aglst->t, order_list[cst].toppings[j]);
                             aglst->topping_stock[tindex] -= 1;
+                            // printf("new toping for %s is %d\n",order_list[cst].toppings[j],aglst->topping_stock[tindex]);
                         }
                         if (cust[order_list[cst].cust_no].cust_arrival == tmr)
                         {
@@ -218,7 +224,7 @@ void *customer_waiting(void *arg)
     if (rejection_cust[aglst->work_index] == 1)
     {
         cust[aglst->work_index].order_completion_status = 1;
-        printf("Order of customer %d got rejected due to ingredient shortage\n", aglst->work_index);
+        printf("Order of customer %d got rejected due to ingredient shortage at time %d and customer leaves\n", aglst->work_index,tmr);
         // sem_post(&capacity);
         current_customers--;
         return NULL;
@@ -265,6 +271,7 @@ int main()
         scanf("%s %d", topping_list[i], &topping_stock[i]);
     int num_cust;
     scanf("%d", &num_cust);
+    // printf("%d\n",num_cust);
     int count = 0;
     for (int i = 1; i <= num_cust; i++)
     {
@@ -275,6 +282,7 @@ int main()
         {
             scanf("%d", &num_t);
             order_list[count].cust_no = cust[i].cust_no;
+            order_list[count].totaltoppings=num_t;
             scanf("%s", order_list[count].flavour);
             for (int k = 0; k < num_t; k++)
                 scanf("%s", order_list[count].toppings[k]);
@@ -336,20 +344,20 @@ int main()
         for (int i = 1; i <= num_cust; i++)
         {
             sem_wait(&superlock);
+            printf("current_cust=%d and k=%d\n",current_customers,k);
             if (cust[i].cust_arrival == tmr)
             {
                 if (current_customers == k)
                 {
                     returned_count++;
-                    sem_post(&superlock);
                     break;
                 }
                 else
                 {
                     new_enter_flag = 1;
                     sem_post(&customers[i]);
-                    sem_post(&superlock);
                 }
+                 sem_post(&superlock);
             }
             else
             {
@@ -369,7 +377,7 @@ int main()
         }
         for (int i = 0; i < n; i++)
         {
-            if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] < tmr || special_flag[i] == 1))
+            if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] <= tmr || special_flag[i] == 1))
             {
                 sem_post(&machines[i]);
                 special_flag[i] = 0;
@@ -432,3 +440,114 @@ chocolate brownie strawberry
 2 2 1
 2
 sid strawberry caramel*/
+
+/*2 1000 2 3
+0 7
+4 10
+vanilla 3 
+chocolate 4
+caramel 100000
+brownie 4
+strawberry 4
+6
+1 1 2
+1
+vanilla caramel
+2
+chocolate brownie strawberry
+2 2 1
+2
+vanilla strawberry caramel
+3 8 1
+1
+vanilla caramel
+4 9 1
+1
+vanilla caramel
+5 13 1
+1
+vanilla caramel
+6 15 1
+1
+vanilla caramel*/
+
+/*1 10 1 1
+0 5
+vanilla 1
+caramel 1
+2
+1 1 1
+1
+vanilla caramel
+2 2 1
+1
+vanilla caramel*/
+
+/*1 10 1 1
+0 5
+vanilla 1
+caramel 2
+2
+1 1 1
+1
+vanilla caramel
+2 2 1
+1
+vanilla caramel
+*/
+
+/*1 1 2 3
+0 18
+vanilla 3
+chocolate 4
+caramel 100000
+brownie 4
+strawberry 4
+2
+1 1 2
+1
+vanilla caramel
+2
+chocolate brownie strawberry
+2 2 1
+2
+vanilla strawberry caramel*/
+
+/*1 1 2 3
+0 10
+vanilla 3
+chocolate 4
+caramel 100000
+brownie 4
+strawberry 4
+1
+1 1 2
+1
+vanilla caramel
+2
+chocolate brownie strawberry*/
+
+/*1 1 2 3
+0 10
+vanilla 3
+chocolate 4
+caramel 100000
+brownie 4
+strawberry 4
+2
+1 1 1
+1
+vanilla caramel
+2 1 1
+2
+chocolate brownie strawberry*/
+
+/*2 1 1 1
+0 5
+0 6
+vanilla 2
+caramel 10000
+1
+1 1 1
+1
+vanilla caramel*/
