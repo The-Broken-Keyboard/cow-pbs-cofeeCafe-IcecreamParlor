@@ -16,6 +16,8 @@
 #define BMAG "\e[1;35m"
 int special_flag[100];
 int some_ing_exh = 0;
+int wake_up_index[100];
+int ingredient_over = 0;
 struct customernode
 {
     int cust_no;
@@ -48,6 +50,7 @@ sem_t customers[100];
 sem_t rej_customers[100];
 sem_t machine_lock;
 int finish_time_order[100];
+int wake_up_index_cust[100];
 // sem_t order_number;
 // sem_t machine_number;
 sem_t superlock;
@@ -81,6 +84,50 @@ void init_ordernode()
         for (int j = 0; j < 50; j++)
             order_list[i].toppings[j] = (char *)malloc(sizeof(char) * 20);
     }
+}
+int free_machine(int no, int n, int *machine_start, int *machine_end)
+{
+    for (int i = 0; i < n; i++)
+    {
+        if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] < tmr || special_flag[i] == 1))
+        {
+            no--;
+            special_flag[i] = 0;
+            if (no == 0)
+            {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+int order_comp_machine(int no, int n)
+{
+    for (int i = 0; i < n; i++)
+    {
+        if (finish_time_order[i] == tmr)
+        {
+            no--;
+            if (no == 0)
+                return i;
+        }
+    }
+    return -1;
+}
+int wake_up_order_comp[100];
+int to_enter_customer(int no, int cust_cnt)
+{
+    for (int i = 1; i <= cust_cnt; i++)
+    {
+        if (cust[i].cust_arrival == tmr)
+        {
+            no--;
+            if (no == 0)
+                return i;
+        }
+    }
+    return -1;
 }
 int close_sig = 0;
 
@@ -155,34 +202,61 @@ int any_order_being_prepared(int order_cnt)
 }
 int ingredient_exhausted_checker(int *topping_stock, int total)
 {
+    int count = 0;
     for (int i = 0; i < total; i++)
     {
-        if (topping_stock[i]!=-1 && !(topping_stock[i] <= 0))
+        if (topping_stock[i] != -1)
+            count++;
+        if (topping_stock[i] != -1 && !(topping_stock[i] <= 0))
             return 0;
     }
-    return 1;
+    if (count)
+    {
+        ingredient_over = 1;
+        return 1;
+    }
+    return 0;
 }
 
 void *machine_simulation(void *arg)
 {
     struct arglist *aglst = (struct arglist *)arg;
     sem_wait(&machines[aglst->work_index]);
-    printf(ORANGE "Machine %d started at %d sec\n" RESET, aglst->work_index + 1, tmr);
+    if (close_sig == 1)
+    {
+        // if (some_ing_exh == 1)
+        // {
+        //     printf(RED "Customer %d was not serviced because parlor closed suddenly\n" RESET, aglst->work_index);
+        //     return NULL;
+        // }
+        // printf(RED "Customer %d was not serviced due to unavailability of machines\n" RESET, aglst->work_index);
+        return NULL;
+    }
+    printf(ORANGE "Machine %d has started working at %d second(s)\n" RESET, aglst->work_index + 1, tmr);
     int cst = 0;
     int flag = -1;
     while (1)
     {
 
         sem_wait(&machines[aglst->work_index]);
+        // printf("hello from machine %d\n", aglst->work_index + 1);
         if (close_sig == 1)
         {
-            if(some_ing_exh==1)
-            printf(RED"Machine %d turned off because some ingredient got exhausted\n"RESET,aglst->work_index+1);
+            if (some_ing_exh == 1 && aglst->machine_end[aglst->work_index] >= tmr)
+                printf(RED "Machine %d turned off because some ingredient got exhausted\n" RESET, aglst->work_index + 1);
             return NULL;
         }
         if (flag == -1)
         {
+            if(ingredient_over==1)
+            continue;
             sem_wait(&machine_lock);
+            if (wake_up_index[aglst->work_index] != -1)
+            {
+                int temp = wake_up_index[aglst->work_index];
+                wake_up_index[aglst->work_index] = -1;
+                sem_post(&machines[temp]);
+            }
             // printf("hello by machine %d\n",aglst->work_index);
             // sem_wait(&order_number);
             for (; cst < totalorders; cst++)
@@ -260,11 +334,29 @@ void *machine_simulation(void *arg)
         }
         if (flag != -1)
         {
-
+            
+            if (wake_up_index[aglst->work_index] != -1)
+            {
+                int temp = wake_up_index[aglst->work_index];
+                wake_up_index[aglst->work_index] = -1;
+                sem_post(&machines[temp]);
+            }
             printf(CYN "Machine %d starts preparing ice cream %d of customer %d at %d seconds(s)\n" RESET, aglst->work_index + 1, order_list[flag].order_no_cust, order_list[flag].cust_no, tmr);
             sem_wait(&order_comp[aglst->work_index]);
+            if (close_sig == 1)
+            {
+                if (some_ing_exh == 1 && aglst->machine_end[aglst->work_index] >= tmr)
+                    printf(RED "Machine %d turned off because some ingredient got exhausted\n" RESET, aglst->work_index + 1);
+                return NULL;
+            }
             order_list[flag].orderstatus = 1;
             printf(BLUE "Machine %d completes preparing ice cream %d of customer %d at %d seconds(s)\n" RESET, aglst->work_index + 1, order_list[flag].order_no_cust, order_list[flag].cust_no, tmr);
+            if (wake_up_order_comp[aglst->work_index] != -1)
+            {
+                int temp = wake_up_order_comp[aglst->work_index];
+                wake_up_order_comp[aglst->work_index] = -1;
+                sem_post(&order_comp[temp]);
+            }
             if (order_status_checker(order_list[flag].cust_no))
             {
                 sem_post(&rej_customers[order_list[flag].cust_no]);
@@ -285,17 +377,32 @@ void *customer_waiting(void *arg)
     struct arglist *aglst = (struct arglist *)arg;
     // sem_wait(&capacity);
     sem_wait(&customers[aglst->work_index]);
-    sem_wait(&superlock);
+    if (close_sig == 1)
+    {
+        // if (some_ing_exh == 1)
+        // {
+        //     printf(RED "Customer %d was not serviced because parlor closed suddenly\n" RESET, aglst->work_index);
+        //     return NULL;
+        // }
+        // printf(RED "Customer %d was not serviced due to unavailability of machines\n" RESET, aglst->work_index);
+        return NULL;
+    }
+    // sem_wait(&superlock);
     totalorders = totalorders + cust[aglst->work_index].total_orders;
     if (current_customers == aglst->k)
     {
-        printf(RED"Customer %d left because parlor was full at time %d\n"RESET, cust[aglst->work_index], tmr);
+        printf(RED "Customer %d left because parlor was full at time %d\n" RESET, cust[aglst->work_index], tmr);
         cust[aglst->work_index].order_completion_status = 1;
         returned_count++;
-        sem_post(&superlock);
-        if (last_cust_to_enter_flag == cust[aglst->work_index].cust_no)
+        // sem_post(&superlock);
+        if (wake_up_index_cust[aglst->work_index] != -1)
         {
-            last_cust_to_enter_flag = -1;
+            int temp = wake_up_index_cust[aglst->work_index];
+            wake_up_index_cust[aglst->work_index] = -1;
+            sem_post(&customers[temp]);
+        }
+        else
+        {
             sem_post(&machine_lock);
         }
         return NULL;
@@ -307,10 +414,15 @@ void *customer_waiting(void *arg)
         printf(RED "Customer %d was rejected due to ingredient shortage so order was not accepted\n" RESET, cust[aglst->work_index].cust_no);
         cust[aglst->work_index].order_completion_status = 1;
         // totalorders = totalorders + cust[aglst->work_index].total_orders;
-        sem_post(&superlock);
-        if (last_cust_to_enter_flag == cust[aglst->work_index].cust_no)
+        // sem_post(&superlock);
+        if (wake_up_index_cust[aglst->work_index] != -1)
         {
-            last_cust_to_enter_flag = -1;
+            int temp = wake_up_index_cust[aglst->work_index];
+            wake_up_index_cust[aglst->work_index] = -1;
+            sem_post(&customers[temp]);
+        }
+        else
+        {
             sem_post(&machine_lock);
         }
         return NULL;
@@ -330,18 +442,23 @@ void *customer_waiting(void *arg)
     current_customers++;
     // sem_wait(&superlock);
     // sem_post(&order_number);
-    sem_post(&superlock);
-    if (last_cust_to_enter_flag == cust[aglst->work_index].cust_no)
+    // sem_post(&superlock);
+    if (wake_up_index_cust[aglst->work_index] != -1)
     {
-        last_cust_to_enter_flag = -1;
+        int temp = wake_up_index_cust[aglst->work_index];
+        wake_up_index_cust[aglst->work_index] = -1;
+        sem_post(&customers[temp]);
+    }
+    else
+    {
         sem_post(&machine_lock);
     }
     sem_wait(&rej_customers[aglst->work_index]);
     if (close_sig == 1)
     {
-        if(some_ing_exh==1)
+        if (some_ing_exh == 1)
         {
-            printf(RED"Customer %d was not serviced because parlor closed suddenly\n"RESET,aglst->work_index);
+            printf(RED "Customer %d was not serviced because parlor closed suddenly\n" RESET, aglst->work_index);
             return NULL;
         }
         printf(RED "Customer %d was not serviced due to unavailability of machines\n" RESET, aglst->work_index);
@@ -499,42 +616,8 @@ int main()
             order_cnt++;
         }
         cust_cnt++;
-        // getchar();
     }
 
-    // for(int i=0;i<order_cnt;i++)
-    // {
-    //     printf("order %d flavour %s toppings:",i,order_list[i].flavour);
-    //     for(int j=0;j<order_list[i].totaltoppings;j++)
-    //     printf("%s ",order_list[i].toppings[j]);
-    //     printf("\n");
-    // }
-    // printf("\n");
-    // for(int i=0;i<cust_cnt;i++)
-    // {
-    //     printf("cust no %d cust arrival time %d customer orders %d\n",cust[i+1].cust_no,cust[i+1].cust_arrival,cust[i+1].total_orders);
-    // }
-
-    // int num_cust;
-    // scanf("%d", &num_cust);
-    // // printf("%d\n",num_cust);
-    // int count = 0;
-    // for (int i = 1; i <= num_cust; i++)
-    // {
-    //     int num_t;
-    //     scanf("%d %d %d", &cust[i].cust_no, &cust[i].cust_arrival, &cust[i].total_orders);
-    //     cust[i].order_completion_status = 0;
-    //     for (int j = 0; j < cust[i].total_orders; j++)
-    //     {
-    //         scanf("%d", &num_t);
-    //         order_list[count].cust_no = cust[i].cust_no;
-    //         order_list[count].totaltoppings=num_t;
-    //         scanf("%s", order_list[count].flavour);
-    //         for (int k = 0; k < num_t; k++)
-    //             scanf("%s", order_list[count].toppings[k]);
-    //         count++;
-    //     }
-    // }
     sem_init(&capacity, 0, k);
     sem_init(&superlock, 0, 1);
     sem_init(&machine_lock, 0, 1);
@@ -547,6 +630,9 @@ int main()
         finish_time_order[i] = -1;
         rejection_cust[i] = 0;
         special_flag[i] = 0;
+        wake_up_index[i] = -1;
+        wake_up_index_cust[i] = -1;
+        wake_up_order_comp[i] = -1;
     }
     struct arglist arg[n];
     pthread_t machine_threads[n];
@@ -580,35 +666,30 @@ int main()
         arg2[i].topping_list = topping_list;
         arg2[i].topping_stock = topping_stock;
         arg2[i].work_index = i;
-        pthread_create(&customer_threads[i-1], NULL, customer_waiting, &arg2[i]);
+        pthread_create(&customer_threads[i - 1], NULL, customer_waiting, &arg2[i]);
     }
-
-    // int returned_count = 0;
+    printf("ingredient: %d\n", ingredient_exhausted_checker(topping_stock, t));
     while (tmr <= max && !(ingredient_exhausted_checker(topping_stock, t) && any_order_being_prepared(order_cnt)))
-    {   printf(BMAG"time: %d sec\n\n"RESET,tmr);
-        int total_about_to_enter = 0;
-        int total_about_to_enter2 = 0;
+    {
+        printf(BMAG "time: %d sec\n\n" RESET, tmr);
         sem_wait(&machine_lock);
-        for (int i = 1; i <= cust_cnt; i++)
+
+        int count_cust = 1;
+        int first_free_cust = to_enter_customer(count_cust++, cust_cnt);
+        int temp_cust = first_free_cust;
+        while (temp_cust != -1)
         {
-            if (cust[i].cust_arrival == tmr)
-                total_about_to_enter++;
+            int temp2_cust = to_enter_customer(count_cust++, cust_cnt);
+            wake_up_index_cust[temp_cust] = temp2_cust;
+            temp_cust = temp2_cust;
         }
-        total_about_to_enter2 = total_about_to_enter;
-        for (int i = 1; i <= cust_cnt; i++)
+        if (first_free_cust != -1)
+            sem_post(&customers[first_free_cust]);
+        else
         {
-            if (cust[i].cust_arrival == tmr)
-            {
-                if (total_about_to_enter == 1)
-                {
-                    last_cust_to_enter_flag = cust[i].cust_no;
-                }
-                sem_post(&customers[i]);
-                total_about_to_enter--;
-            }
-        }
-        if (total_about_to_enter2 == 0)
             sem_post(&machine_lock);
+        }
+
         for (int i = 0; i < n; i++)
         {
             if (machine_start[i] == tmr)
@@ -616,53 +697,78 @@ int main()
                 sem_post(&machines[i]);
             }
         }
-        for (int i = 0; i < n; i++)
+
+        int count = 1;
+        int first_free = free_machine(count++, n, machine_start, machine_end);
+        int temp = first_free;
+        while (temp != -1)
         {
-            if (machine_start[i] <= tmr && tmr <= machine_end[i] && (finish_time_order[i] < tmr || special_flag[i] == 1))
-            {
-                sem_post(&machines[i]);
-                special_flag[i] = 0;
-            }
+            int temp2 = free_machine(count++, n, machine_start, machine_end);
+            wake_up_index[temp] = temp2;
+            temp = temp2;
         }
-        for (int i = 0; i < n; i++)
+        if (first_free != -1)
+            sem_post(&machines[first_free]);
+        int count_ord = 1;
+        int first_free_ord = order_comp_machine(count_ord++, n);
+        int temp_ord = first_free_ord;
+        while (temp_ord != -1)
         {
-            if (finish_time_order[i] == tmr)
-                sem_post(&order_comp[i]);
+            int temp2_ord = order_comp_machine(count_ord++, n);
+            wake_up_order_comp[temp_ord] = temp2_ord;
+            temp_ord = temp2_ord;
         }
+        if (first_free_ord != -1)
+            sem_post(&order_comp[first_free_ord]);
+
+        // for (int i = 0; i < n; i++)
+        // {
+        //     if (finish_time_order[i] == tmr)
+        //         sem_post(&order_comp[i]);
+        // }
         sleep(1);
         for (int i = 0; i < n; i++)
         {
             if (machine_end[i] == tmr)
             {
-                printf(ORANGE "Machine no %d stopped at %d sec\n" RESET, i + 1, tmr);
+                printf(ORANGE "Machine %d has stopped working at %d second(s)\n" RESET, i + 1, tmr);
             }
         }
         tmr += 1;
         printf("\n");
     }
-    printf(BMAG"time: %d sec\n\n"RESET,tmr);
-    if ((ingredient_exhausted_checker(topping_stock, t) && any_order_being_prepared(order_cnt)) && tmr < max)
+    printf(BMAG "time: %d sec\n\n" RESET, tmr);
+    if ((ingredient_exhausted_checker(topping_stock, t)) && tmr <= max)
     {
         some_ing_exh = 1;
     }
     close_sig = 1;
     for (int i = 0; i < n; i++)
         sem_post(&machines[i]);
+    for (int i = 0; i < n; i++)
+    {
+        if (finish_time_order[i] >= tmr)
+            sem_post(&order_comp[i]);
+        if (machine_start[i] >= tmr)
+            sem_post(&machines[i]);
+    }
     for (int i = 1; i <= cust_cnt; i++)
     {
         if (cust[i].order_completion_status == 0)
         {
             sem_post(&rej_customers[i]);
         }
+        if (cust[i].cust_arrival >= tmr)
+            sem_post(&customers[i]);
     }
-    for(int i=0;i<n;i++)
-    pthread_join(machine_threads[i],NULL);
-    for(int i=1;i<=cust_cnt;i++)
-    pthread_join(customer_threads[i-1],NULL);
-    if(some_ing_exh==0)
-    printf(WHITE "Parlour closed\n" RESET);
-    if(some_ing_exh==1)
-    printf(RED"Parlour closed because some ingredient exhausted\n"RESET);
+    for (int i = 0; i < n; i++)
+        pthread_join(machine_threads[i], NULL);
+    for (int i = 1; i <= cust_cnt; i++)
+        pthread_join(customer_threads[i - 1], NULL);
+    if (some_ing_exh == 0)
+        printf(WHITE "Parlour closed\n" RESET);
+    if (some_ing_exh == 1)
+        printf(RED "Parlour closed because some ingredient exhausted\n" RESET);
     printf(RED "No. of customers left due to space unavailability: %d \n" RESET, returned_count);
 }
 

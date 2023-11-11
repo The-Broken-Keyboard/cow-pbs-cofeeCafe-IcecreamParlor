@@ -13,6 +13,7 @@
 #define RED "\033[0;31m"
 #define YELLOW "\033[0;33m"
 #define ORANGE "\e[38;2;255;85;0m"
+#define BMAG "\e[1;35m"
 int special_flag[100];
 struct customernode
 {
@@ -45,6 +46,8 @@ sem_t customers[100];
 sem_t rej_customers[100];
 sem_t machine_lock;
 int finish_time_order[100];
+int wake_up_index[100];
+int wake_up_index_cust[100];
 // sem_t order_number;
 // sem_t machine_number;
 sem_t superlock;
@@ -88,6 +91,35 @@ int give_index(char **array, int size, char *string)
     }
     return -1;
 }
+int free_barista(int no,int b)
+{
+    for(int i=0;i<b;i++)
+    {
+        if(finish_time_order[i]<=tmr || special_flag[i]==1)
+        {
+            no--;
+            special_flag[i]=0;
+            if(no==0){
+            return i;
+            }
+        }
+    }
+    return -1;
+}
+
+int to_enter_customer(int no, int cust_cnt)
+{
+    for (int i = 1; i <= cust_cnt; i++)
+    {
+        if (cust[i].cust_arrival == tmr)
+        {
+            no--;
+            if (no == 0)
+                return i;
+        }
+    }
+    return -1;
+}
 
 void *barista_simulation(void *arg)
 {
@@ -102,6 +134,12 @@ void *barista_simulation(void *arg)
         if (flag == -1)
         {
             sem_wait(&machine_lock);
+            if (wake_up_index[aglst->work_index] != -1)
+            {
+                int temp=wake_up_index[aglst->work_index];
+                wake_up_index[aglst->work_index]=-1;
+                sem_post(&baristas[temp]);
+            }
             // printf("hello by machine %d\n",aglst->work_index);
             // sem_wait(&order_number);
             for (; cst < totalorders; cst++)
@@ -130,11 +168,23 @@ void *barista_simulation(void *arg)
                 }
             }
             sem_post(&machine_lock);
-    
         }
         else if (flag != -1)
         {
-
+            // if(wake_up_index[aglst->work_index]!=-1)
+            // sem_post(&baristas[wake_up_index[aglst->work_index]]);
+             if (wake_up_index[aglst->work_index] != -1)
+            {
+                int temp=wake_up_index[aglst->work_index];
+                wake_up_index[aglst->work_index]=-1;
+                sem_post(&baristas[temp]);
+            }
+            if(cust[order_list[flag].cust_no].order_completion_status==1)
+            {
+                flag=-1;
+                finish_time_order[aglst->work_index]=-1;
+                continue;
+            }
             printf(CYN "Barista %d starts preparing cofee of customer %d at %d seconds(s)\n" RESET, aglst->work_index + 1, order_list[flag].cust_no, tmr);
             sem_wait(&order_comp[aglst->work_index]);
             order_list[flag].orderstatus = 1;
@@ -161,14 +211,19 @@ void *customer_waiting(void *arg)
 
     struct arglist *aglst = (struct arglist *)arg;
     sem_wait(&customers[aglst->work_index]);
-    sem_wait(&superlock);
+    
     totalorders = totalorders + 1;
     printf(YELLOW "Customer %d enters at time %d sec\n" RESET, aglst->work_index, tmr);
     printf(YELLOW "Customer %d orders a %s\n" RESET, aglst->work_index, order_list[aglst->work_index-1].cofee);
-    sem_post(&superlock);
-    if (last_cust_to_enter_flag == cust[aglst->work_index].cust_no)
+    
+   if (wake_up_index_cust[aglst->work_index] != -1)
     {
-        last_cust_to_enter_flag = -1;
+        int temp = wake_up_index_cust[aglst->work_index];
+        wake_up_index_cust[aglst->work_index] = -1;
+        sem_post(&customers[temp]);
+    }
+    else
+    {
         sem_post(&machine_lock);
     }
     tol_time[aglst->work_index]=cust[aglst->work_index].cust_arrival+cust[aglst->work_index].tol_time+1;
@@ -221,6 +276,8 @@ int main()
         finish_time_order[i] = -1;
         tol_time[i] = -1;
         special_flag[i] = 0;
+        wake_up_index[i]=-1;
+        wake_up_index_cust[i]=-1;
     }
     struct arglist arg[b];
     pthread_t machine_threads[b];
@@ -249,36 +306,45 @@ int main()
     // int returned_count = 0;
     while (customer_remaining(n))
     {
-        int total_about_to_enter = 0;
-        int total_about_to_enter2 = 0;
+         printf(BMAG "time: %d sec\n\n" RESET, tmr);
         sem_wait(&machine_lock);
-        for (int i = 1; i <= n; i++)
+
+
+       int count_cust = 1;
+        int first_free_cust = to_enter_customer(count_cust++, n);
+        int temp_cust = first_free_cust;
+        while (temp_cust != -1)
         {
-            if (cust[i].cust_arrival == tmr)
-                total_about_to_enter++;
+            int temp2_cust = to_enter_customer(count_cust++, n);
+            wake_up_index_cust[temp_cust] = temp2_cust;
+            temp_cust = temp2_cust;
         }
-        total_about_to_enter2 = total_about_to_enter;
-        for (int i = 1; i <= n; i++)
+        if (first_free_cust != -1)
+            sem_post(&customers[first_free_cust]);
+        else
         {
-            if (cust[i].cust_arrival == tmr)
-            {
-                if (total_about_to_enter == 1)
-                {
-                    last_cust_to_enter_flag = cust[i].cust_no;
-                }
-                sem_post(&customers[i]);
-                total_about_to_enter--;
-            }
-        }
-        if (total_about_to_enter2 == 0)
             sem_post(&machine_lock);
-        for (int i = 0; i < b; i++)
-        {
-            if(finish_time_order[i]<=tmr || special_flag[i]==1){
-            sem_post(&baristas[i]);
-            special_flag[i]=0;
-            }
         }
+
+
+        int count=1;
+        int first_free=free_barista(count++,b);
+        int temp=first_free;
+        while(temp!=-1)
+        {
+            int temp2=free_barista(count++,b);
+            wake_up_index[temp]=temp2;
+            temp=temp2;
+        }
+        if(first_free!=-1)
+        sem_post(&baristas[first_free]);
+        // for (int i = 0; i < b; i++)
+        // {
+        //     if(finish_time_order[i]<=tmr || special_flag[i]==1){
+        //     sem_post(&baristas[i]);
+        //     special_flag[i]=0;
+        //     }
+        // }
         for (int i = 0; i < b; i++)
         {
             if (finish_time_order[i] == tmr)
@@ -293,7 +359,9 @@ int main()
         }
         sleep(1);
         tmr += 1;
+        printf("\n");
     }
+    printf(BMAG "time: %d sec\n\n" RESET, tmr);
     close_sig = 1;
     for (int i = 0; i < n; i++)
         sem_post(&baristas[i]);

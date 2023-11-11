@@ -115,6 +115,8 @@ int change_priority(int new,struct proc* prc)
   int op = prc->st_priority;
   prc->st_priority = new;
   release(&prc->lock);
+  if(new<op)
+  yield();
   return op;
 }
 int check_valid_newp(int new)
