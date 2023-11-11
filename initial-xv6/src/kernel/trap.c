@@ -15,12 +15,20 @@ extern char trampoline[], uservec[], userret[];
 void kernelvec();
 
 extern int devintr();
-
+void modify_flag_cow_to_write(void* flag)
+{
+  *((uint*)flag)=((*((uint*)flag) | PTE_W) & ~ PTE_CW);
+}
 void trapinit(void)
 {
   initlock(&tickslock, "time");
 }
-
+int check_valid_add(void* add)
+{
+   if(*((uint64*)add)>=MAXVA || *((uint64*)add)<=0)
+   return 1;
+   return 0;
+}
 // set up to take exceptions and traps while in the kernel.
 void trapinithart(void)
 {
@@ -31,6 +39,30 @@ void trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+int write_trap(uint64 add, pagetable_t pg)
+{
+  uint64 pa;
+  pte_t *pte;
+  uint flags;
+
+  if (check_valid_add((void*)&add))
+    return -1;
+  add = PGROUNDDOWN(add);
+  if ((pte=walk(pg,add,0)) == 0)
+    return -1;
+
+  pa = PTE2PA(*pte);
+  if (check_if_cow_flag((void*)pte))
+  {
+    flags= PTE_FLAGS(*((pte_t*)pte));
+     char* mem = allocate_new_memory((void*)&pa);
+     if(mem==0)
+     return -1;
+    modify_flag_cow_to_write((void*)&flags);
+    *pte = PA2PTE((uint64)mem) | flags;
+  }
+  return 0;
+}
 void usertrap(void)
 {
   int which_dev = 0;
@@ -67,6 +99,13 @@ void usertrap(void)
   else if ((which_dev = devintr()) != 0)
   {
     // ok
+  }
+  else if (r_scause() == 15)
+  {
+    uint64 va = r_stval();
+
+    if (write_trap(va,p->pagetable) != 0)
+      p->killed = 1;
   }
   else
   {
@@ -129,7 +168,13 @@ void usertrapret(void)
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
   ((void (*)(uint64))trampoline_userret)(satp);
 }
-
+int check_if_cow_flag(void*pte)
+{
+  uint flags= PTE_FLAGS(*((pte_t*)pte));
+  if(flags & PTE_CW)
+  return 1;
+  return 0;
+}
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
 void kerneltrap()
@@ -183,7 +228,16 @@ void clockintr()
   wakeup(&ticks);
   release(&tickslock);
 }
+char* allocate_new_memory(void* pa)
+{
+  char *mem = kalloc();
+    if (mem == 0) 
+    return 0;
 
+    memmove(mem, (char*)(*((uint64*)pa)), PGSIZE);
+    kfree((void*)(*((uint64*)pa)));
+    return mem;
+}
 // check if it's an external interrupt or software interrupt,
 // and handle it.
 // returns 2 if timer interrupt,

@@ -31,6 +31,10 @@ int main()
       // printf("Process %d finished\n", n);
       exit(0);
     }
+    else if (pid>0 && n<IO)
+    {
+      setpriority(pid,99);
+    }
   }
   for (; n > 0; n--)
   {

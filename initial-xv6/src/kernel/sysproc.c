@@ -108,3 +108,53 @@ sys_waitx(void)
     return -1;
   return ret;
 }
+int change_priority(int new,struct proc* prc)
+{
+  prc->running_time=0;
+  prc->sleep_time=0;
+  int op = prc->st_priority;
+  prc->st_priority = new;
+  release(&prc->lock);
+  return op;
+}
+int check_valid_newp(int new)
+{
+  if(new<0 || new>100)
+  return 1;
+  return 0;
+}
+int check_valid_pid(int pid)
+{
+  if(pid<0)
+  return 1;
+  return 0;
+}
+uint64
+sys_setpriority(void){
+
+#ifdef PBS
+  int new;
+   int pid;
+  argint(0,&pid);
+  argint(1,&new);
+  if(check_valid_newp(new)||check_valid_pid(pid)){
+    return -1;
+  }
+  struct proc* prc=0;
+  for( struct proc* p=proc;p<&proc[NPROC];p++){
+    if(p->pid == pid){
+      acquire(&p->lock);
+      prc=p;
+      break;
+    }
+  }
+  if(!prc){
+    return -1;
+  }  
+  return change_priority(new,prc);
+
+#endif
+#ifndef PBS
+  return -1;
+#endif
+}

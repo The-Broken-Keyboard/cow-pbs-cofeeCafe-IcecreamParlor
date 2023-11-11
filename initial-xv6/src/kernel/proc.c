@@ -152,6 +152,12 @@ found:
   p->rtime = 0;
   p->etime = 0;
   p->ctime = ticks;
+  p->wait_time=0;
+  p->running_time=0;
+  p->sleep_time=0;
+  p->st_priority=50;
+  p->rbi=25;
+  p->schedule_count=0;
   return p;
 }
 
@@ -280,6 +286,24 @@ int growproc(int n)
   }
   p->sz = sz;
   return 0;
+}
+int max(int a, int b)
+{
+  if(a>b)
+  return a;
+  return b;
+}
+int min(int a, int b)
+{
+  if(a<b)
+  return a;
+  return a;
+}
+int rbi_calculator(struct proc* p)
+{
+  int rbi= (((3*p->running_time -p->sleep_time-p->wait_time)*50)/(p->running_time+p->wait_time+p->sleep_time+1));
+  p->rbi=max(rbi,0);
+  return max(rbi,0);
 }
 
 // Create a new process, copying the parent.
@@ -450,7 +474,10 @@ int wait(uint64 addr)
     sleep(p, &wait_lock); // DOC: wait-sleep
   }
 }
-
+int dp_calc(struct proc* p)
+{
+  return min(p->st_priority+rbi_calculator(p),100);
+}
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -460,15 +487,15 @@ int wait(uint64 addr)
 //    via swtch back to the scheduler.
 void scheduler(void)
 {
-  struct proc *p;
+  
   struct cpu *c = mycpu();
-
   c->proc = 0;
   for (;;)
   {
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-
+    #ifdef RR
+    struct proc *p;
     for (p = proc; p < &proc[NPROC]; p++)
     {
       acquire(&p->lock);
@@ -487,6 +514,36 @@ void scheduler(void)
       }
       release(&p->lock);
     }
+    #endif
+    #ifdef PBS
+      struct proc *pri_pro = 0;
+
+    for (struct proc *p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE && (!pri_pro || (dp_calc(p)<dp_calc(pri_pro))||((dp_calc(p)==dp_calc(pri_pro))&&(p->schedule_count<pri_pro->schedule_count))||
+      ((dp_calc(p)==dp_calc(pri_pro))&&(p->schedule_count==pri_pro->schedule_count)&&(p->ctime<pri_pro->ctime))))
+      {
+        if (pri_pro!=0)
+          release(&pri_pro->lock);
+        pri_pro = p;
+        continue;
+      }
+       release(&p->lock);
+    }
+    if(pri_pro==0)
+    continue;
+    if (pri_pro)
+    {
+      pri_pro->schedule_count++;
+      pri_pro->running_time=0;
+      pri_pro->state = RUNNING;
+      c->proc = pri_pro;
+      swtch(&c->context, &pri_pro->context);
+      c->proc = 0;
+      release(&pri_pro->lock);
+    }
+    #endif
   }
 }
 
@@ -699,6 +756,9 @@ void procdump(void)
     else
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
+    #ifdef PBS
+    printf(" st_priority:%d rbi:%d sche_count:%d , slp_time:%d , rt:%d wt:%d",p->st_priority,p->rbi,p->schedule_count,p->sleep_time,p->running_time,p->wait_time);
+    #endif
     printf("\n");
   }
 }
@@ -761,13 +821,22 @@ int waitx(uint64 addr, uint *wtime, uint *rtime)
 void update_time()
 {
   struct proc *p;
+  // procdump();
   for (p = proc; p < &proc[NPROC]; p++)
   {
     acquire(&p->lock);
     if (p->state == RUNNING)
     {
       p->rtime++;
+      p->running_time++;
+      p->sleep_time=0;
     }
+    if(p->state== RUNNABLE)
+    {
+      p->wait_time++;
+    }
+    if(p->state==SLEEPING)
+    p->sleep_time++;
     release(&p->lock);
   }
 }

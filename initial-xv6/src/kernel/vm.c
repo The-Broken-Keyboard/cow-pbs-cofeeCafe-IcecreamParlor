@@ -45,7 +45,6 @@ kvmmake(void)
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
   return kpgtbl;
 }
 
@@ -134,7 +133,10 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
   if(mappages(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
 }
-
+void change_flag_from_write_to_cow(void* pte)
+{
+       *((pte_t*)pte)= ((*((pte_t*)pte) | PTE_CW) & ~PTE_W);
+}
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
@@ -190,7 +192,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     *pte = 0;
   }
 }
-
+void change_flag_from_cow_to_write(void* pte)
+{
+       *((pte_t*)pte)= ((*((pte_t*)pte) | PTE_W) & ~PTE_CW);
+}
 // create an empty user page table.
 // returns 0 if out of memory.
 pagetable_t
@@ -247,7 +252,12 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
   }
   return newsz;
 }
-
+void map_new_to_old(void* pte,void* new,void* va)
+{
+  pte_t* nw_pte=walk(*((pagetable_t*)new),*((uint64*)va),1);
+  *nw_pte=*((pte_t*)pte);
+  return;
+}
 // Deallocate user pages to bring the process size from oldsz to
 // newsz.  oldsz and newsz need not be page-aligned, nor does newsz
 // need to be less than oldsz.  oldsz can be larger than the actual
@@ -296,6 +306,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
@@ -306,30 +317,18 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
-
+  uint64  i;
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+    change_flag_from_write_to_cow((void*)pte);
+    map_new_to_old((void*)pte,(void*)&new,(void*)&i);
+    uint64 physaddress=PTE2PA(*pte);
+    increase_no_of_ref((void*)physaddress);
   }
   return 0;
-
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
 }
 
 // mark a PTE invalid for user access.
@@ -355,6 +354,26 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    uint64 pa;
+  pte_t *pte;
+  uint flags;
+
+  if (check_valid_add((void*)&va0))
+    return -1;
+  va0 = PGROUNDDOWN(va0);
+  if ((pte=walk(pagetable,va0,0)) == 0)
+    return -1;
+
+  pa = PTE2PA(*pte);
+  if (check_if_cow_flag((void*)pte))
+  {
+    flags= PTE_FLAGS(*((pte_t*)pte));
+     char* mem = allocate_new_memory((void*)&pa);
+     if(mem==0)
+     return -1;
+    modify_flag_cow_to_write((void*)&flags);
+    *pte = PA2PTE((uint64)mem) | flags;
+  }
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
