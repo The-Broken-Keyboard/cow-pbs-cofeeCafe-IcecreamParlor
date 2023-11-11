@@ -13,6 +13,7 @@
 #define RED "\033[0;31m"
 #define YELLOW "\033[0;33m"
 #define ORANGE "\e[38;2;255;85;0m"
+#define BMAG "\e[1;35m"
 int special_flag[100];
 int some_ing_exh = 0;
 struct customernode
@@ -156,10 +157,10 @@ int ingredient_exhausted_checker(int *topping_stock, int total)
 {
     for (int i = 0; i < total; i++)
     {
-        if (topping_stock[i] <= 0 && topping_stock[i] != -1)
-            return 1;
+        if (topping_stock[i]!=-1 && !(topping_stock[i] <= 0))
+            return 0;
     }
-    return 0;
+    return 1;
 }
 
 void *machine_simulation(void *arg)
@@ -579,12 +580,12 @@ int main()
         arg2[i].topping_list = topping_list;
         arg2[i].topping_stock = topping_stock;
         arg2[i].work_index = i;
-        pthread_create(&customer_threads[i], NULL, customer_waiting, &arg2[i]);
+        pthread_create(&customer_threads[i-1], NULL, customer_waiting, &arg2[i]);
     }
 
     // int returned_count = 0;
     while (tmr <= max && !(ingredient_exhausted_checker(topping_stock, t) && any_order_being_prepared(order_cnt)))
-    {
+    {   printf(BMAG"time: %d sec\n\n"RESET,tmr);
         int total_about_to_enter = 0;
         int total_about_to_enter2 = 0;
         sem_wait(&machine_lock);
@@ -596,26 +597,6 @@ int main()
         total_about_to_enter2 = total_about_to_enter;
         for (int i = 1; i <= cust_cnt; i++)
         {
-            // sem_wait(&superlock);
-            // printf("current_cust=%d and k=%d\n",current_customers,k);
-            // if (cust[i].cust_arrival == tmr)
-            // {
-            //     if (current_customers == k)
-            //     {
-            //         returned_count++;
-            //         break;
-            //     }
-            //     else
-            //     {
-            //         new_enter_flag = 1;
-            //         sem_post(&customers[i]);
-            //     }
-            //      sem_post(&superlock);
-            // }
-            // else
-            // {
-            //     sem_post(&superlock);
-            // }
             if (cust[i].cust_arrival == tmr)
             {
                 if (total_about_to_enter == 1)
@@ -657,7 +638,9 @@ int main()
             }
         }
         tmr += 1;
+        printf("\n");
     }
+    printf(BMAG"time: %d sec\n\n"RESET,tmr);
     if ((ingredient_exhausted_checker(topping_stock, t) && any_order_being_prepared(order_cnt)) && tmr < max)
     {
         some_ing_exh = 1;
@@ -675,7 +658,7 @@ int main()
     for(int i=0;i<n;i++)
     pthread_join(machine_threads[i],NULL);
     for(int i=1;i<=cust_cnt;i++)
-    pthread_join(customer_threads[i],NULL);
+    pthread_join(customer_threads[i-1],NULL);
     if(some_ing_exh==0)
     printf(WHITE "Parlour closed\n" RESET);
     if(some_ing_exh==1)
@@ -831,5 +814,32 @@ vanilla 2
 caramel -1
 1 1 1
 vanilla caramel
+
+*/
+
+/*
+
+2 4 3 5
+0 20
+1 22
+A 3
+B 4
+C 5
+t1 2
+t2 1
+t3 2
+t4 -1
+t5 -1
+1 1 2
+A t1 t2
+B t1 t3
+2 2 1
+A t3 t2
+3 2 1
+A t3 t5
+4 3 1
+A t4 t5
+5 3 1
+B t4 t5
 
 */

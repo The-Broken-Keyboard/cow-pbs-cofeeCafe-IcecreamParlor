@@ -29,6 +29,7 @@ void increase_no_of_ref(void* pa)
   no_of_ref_array[(uint64)pa>>12]++;
   release(&no_of_ref);
 }
+
 void
 kinit()
 {
@@ -36,12 +37,13 @@ kinit()
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
 }
-
 void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
+  char* p2;
+  p2=p;
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
       memset((void *)p, 1, PGSIZE);
       struct run *r = (struct run*)p;
@@ -50,11 +52,8 @@ freerange(void *pa_start, void *pa_end)
       r->next = kmem.freelist;
       kmem.freelist = r;
       release(&kmem.lock);
-
-      acquire(&no_of_ref);
-        no_of_ref_array[(uint64)p>>12] = 0;
-      release(&no_of_ref);
   }
+  initialize_no_of_ref_array((void*)p2,pa_end);
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -109,4 +108,15 @@ kalloc(void)
     release(&no_of_ref);
   } 
   return (void*)r;
+}
+
+void initialize_no_of_ref_array(void* p2,void* pa_end)
+{
+  char* p_new=(char*)p2;
+  for(;p_new+PGSIZE<=(char*)pa_end;p_new+=PGSIZE)
+  {
+     acquire(&no_of_ref);
+        no_of_ref_array[(uint64)p_new>>12] = 0;
+      release(&no_of_ref);
+  }
 }

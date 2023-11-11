@@ -64,6 +64,7 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 void            increase_no_of_ref(void* pa);
+void            initialize_no_of_ref_array(void* p2,void* pa_end);
 
 // log.c
 void            initlog(int, struct superblock*);

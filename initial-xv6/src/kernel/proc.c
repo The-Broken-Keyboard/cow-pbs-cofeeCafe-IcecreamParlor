@@ -757,7 +757,7 @@ void procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     #ifdef PBS
-    printf(" st_priority:%d rbi:%d sche_count:%d , slp_time:%d , rt:%d wt:%d",p->st_priority,p->rbi,p->schedule_count,p->sleep_time,p->running_time,p->wait_time);
+    printf(" st_priority:%d rbi:%d sche_count:%d , slp_time:%d , rt:%d wt:%d  ctime:%d",p->st_priority,p->rbi,p->schedule_count,p->sleep_time,p->running_time,p->wait_time,p->ctime);
     #endif
     printf("\n");
   }
@@ -821,7 +821,7 @@ int waitx(uint64 addr, uint *wtime, uint *rtime)
 void update_time()
 {
   struct proc *p;
-  // procdump();
+  procdump();
   for (p = proc; p < &proc[NPROC]; p++)
   {
     acquire(&p->lock);
