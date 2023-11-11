@@ -61,17 +61,14 @@ So , let’s take both conditions to analyse value of RBI.
    - Since Barista threads and Customer threads will run concurrently , so semaphors are used to give atomicity to critical sections of code.
 
 ### Questions:
- 1. Wating time:
-   wait_time is incremented in two ways for two different scenarios. When a customer gets it's order then the wait time is equal to $(leaving_time - arrival_time - preparation_time_of_coffee)$ . Preparation time of coffee is not added in wait_time if a customer gets served. While if a customer leaves without their order, then wait_time is equal to $(tol_time_of_customer + 1)$.
+ 1. Wating time: wait_time is incremented in two ways for two different  scenarios. When a customer gets it's order then the wait time is equal to $(leaving_time - arrival_time - preparation_time_of_coffee)$ . Preparation time of coffee is not added in wait_time if a customer gets served. While if a customer leaves without their order, then wait_time is equal to $(tol_time_of_customer + 1)$.
    If the cafe had infinite baristas then the wait_time would be $1$ sec for every customer who got served and $(tol_time +1)$
    for all those customers who didn't get served (because they had less tol_time than the prep_time of cofee).
-
    While in the given scenario the wait_time for a customer who did get served will be $>=1$ and for then who didn't get served the wait_time would be same as infinite barista case $(tol_time + 1)$.
-
    So in the given finite baristas scenario the wait_time will either be equal to the case of inifinite baristas , this will happen if each customer gets assigned a barista at the very  moment of it's arrival. Or the wait_time will be greater than the case of infinite baristas (if baristas are busy , when customer arrived).
    So , generally the average wait_time in given finite baristas scenario will be greater than inifinite baristas scenario.
 
- 2. Coffee Wastage:
+ 2. Coffee Wastage: 
    Coffee gets wasted when a barista starts preparing coffee and the corresponding customer leaves without coffee before the coffee is prepared. To avoid this we can implement functionality of checking that whether the coffee can be prepared before tolerance exceeding time of customer or not, if coffee can't be prepared before that then the barista will not start preparing the coffee, knowing that anyhow it is going to get wasted if prepared. So this will minimize waste_coffee count to 0.
 
 ## Ice Cream Parlor Sim
